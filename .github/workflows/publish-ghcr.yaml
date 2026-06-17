@@ -1,0 +1,81 @@
+name: Publish Image to GHCR
+
+# Builds the Watchtower image from the current branch source (via
+# build/docker/Dockerfile.self-local) and pushes it to the GitHub Container
+# Registry (ghcr.io) for this repository's owner.
+#
+# This is a manual, opt-in workflow: it only runs when triggered from the
+# Actions tab. Nothing is published automatically.
+#
+# Authentication uses the built-in GITHUB_TOKEN, so no extra secrets are
+# required. Packages pushed to GHCR are private by default; adjust the
+# package's visibility from its page under the owner's Packages tab if you
+# later want it public.
+#
+# The pushed reference is: ghcr.io/<owner>/<image_name>:<tag>
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_name:
+        description: "Image name under ghcr.io/<owner>/ (e.g. watchtower)"
+        required: false
+        default: "watchtower"
+        type: string
+      tag:
+        description: "Image tag to publish"
+        required: false
+        default: "check-api"
+        type: string
+
+permissions:
+  contents: read # Declare default permissions as read only.
+
+jobs:
+  publish:
+    name: Build and Push (amd64)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # Required to push to GHCR.
+    steps:
+      - name: Harden the Runner (Step Security)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout Repo
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0 # Needed so `git describe --tags` can stamp the version.
+          persist-credentials: false
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        with:
+          platforms: linux/amd64
+
+      - name: Login to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        env:
+          OWNER: ${{ github.repository_owner }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          IMAGE_TAG: ${{ inputs.tag }}
+        run: |
+          # GHCR requires the owner path to be lowercase.
+          OWNER_LC="$(echo "${OWNER}" | tr '[:upper:]' '[:lower:]')"
+          IMAGE_REF="ghcr.io/${OWNER_LC}/${IMAGE_NAME}:${IMAGE_TAG}"
+          echo "Publishing ${IMAGE_REF}"
+          docker buildx build \
+            --platform linux/amd64 \
+            --file build/docker/Dockerfile.self-local \
+            --tag "${IMAGE_REF}" \
+            --push \
+            .
+          echo "### Published \`${IMAGE_REF}\`" >> "$GITHUB_STEP_SUMMARY"
