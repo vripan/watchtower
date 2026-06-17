@@ -557,6 +557,7 @@ func run(command *cobra.Command, args []string) {
 	enableUpdateAPI, _ := command.PersistentFlags().GetBool("http-api-update")
 	enableMetricsAPI, _ := command.PersistentFlags().GetBool("http-api-metrics")
 	enableContainersAPI, _ := command.PersistentFlags().GetBool("http-api-containers")
+	enableCheckAPI, _ := command.PersistentFlags().GetBool("http-api-check")
 	unblockHTTPAPI, _ := command.PersistentFlags().GetBool("http-api-periodic-polls")
 	noStartupMessage, _ := command.PersistentFlags().GetBool("no-startup-message")
 	apiToken, _ := command.PersistentFlags().GetString("http-api-token")
@@ -620,6 +621,7 @@ func run(command *cobra.Command, args []string) {
 		EnableUpdateAPI:     enableUpdateAPI,
 		EnableMetricsAPI:    enableMetricsAPI,
 		EnableContainersAPI: enableContainersAPI,
+		EnableCheckAPI:      enableCheckAPI,
 		UnblockHTTPAPI:      unblockHTTPAPI,
 		NoStartupMessage:    noStartupMessage,
 		APIToken:            apiToken,
@@ -844,6 +846,7 @@ func runMain(cfg types.RunConfig) int {
 			EnableUpdateAPI:             cfg.EnableUpdateAPI,
 			EnableMetricsAPI:            cfg.EnableMetricsAPI,
 			EnableContainersAPI:         cfg.EnableContainersAPI,
+			EnableCheckAPI:              cfg.EnableCheckAPI,
 			UnblockHTTPAPI:              cfg.UnblockHTTPAPI,
 			NoStartupMessage:            cfg.NoStartupMessage,
 			Filter:                      cfg.Filter,

@@ -99,6 +99,35 @@ func CompareDigest(
 	registryAuth string,
 	endpoints ...string,
 ) (bool, error) {
+	_, matches, err := CompareDigestWithRemote(ctx, container, registryAuth, endpoints...)
+
+	return matches, err
+}
+
+// CompareDigestWithRemote behaves like CompareDigest but additionally returns the
+// remote digest fetched from the registry.
+//
+// This lets read-only callers (e.g. the /v1/check API endpoint) report the latest
+// available digest without performing a second registry request. The returned remote
+// digest is normalized (no "sha256:" prefix) and is empty when the comparison did not
+// require a registry lookup (i.e. for locally built images with no RepoDigests).
+//
+// Parameters:
+//   - ctx: Context for request lifecycle control.
+//   - container: Container whose digest is being compared.
+//   - registryAuth: Base64-encoded auth string.
+//   - endpoints: Optional list of registry mirror host overrides to try before the canonical host.
+//
+// Returns:
+//   - string: The normalized remote digest, or empty when no lookup was performed.
+//   - bool: True if digests match (image is up-to-date), false otherwise.
+//   - error: Non-nil if operation fails, nil on success.
+func CompareDigestWithRemote(
+	ctx context.Context,
+	container types.Container,
+	registryAuth string,
+	endpoints ...string,
+) (string, bool, error) {
 	fields := logrus.Fields{
 		"container": container.Name(),
 		"image":     container.ImageName(),
@@ -108,7 +137,7 @@ func CompareDigest(
 	if !container.HasImageInfo() {
 		logrus.WithFields(fields).Debug("Container image info missing")
 
-		return false, errMissingImageInfo
+		return "", false, errMissingImageInfo
 	}
 
 	// Check if the container's image has no RepoDigests, which indicates a locally
@@ -125,7 +154,7 @@ func CompareDigest(
 		logrus.WithFields(fields).
 			Debug("Image with no registry reference detected (empty RepoDigests) - skipping digest comparison")
 
-		return true, nil
+		return "", true, nil
 	}
 
 	// Fetch the latest digest from the registry using a HEAD request for efficiency.
@@ -137,7 +166,7 @@ func CompareDigest(
 		endpoints...,
 	)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 
 	// If HEAD request returned empty digest (due to missing Docker-Content-Digest header),
@@ -153,7 +182,7 @@ func CompareDigest(
 			endpoints...,
 		)
 		if err != nil {
-			return false, err
+			return "", false, err
 		}
 	}
 
@@ -166,7 +195,7 @@ func CompareDigest(
 		WithField("matches", matches).
 		Debug("Completed digest comparison")
 
-	return matches, nil
+	return NormalizeDigest(remoteDigest), matches, nil
 }
 
 // FetchDigest retrieves the digest of an image from its registry using a GET request.

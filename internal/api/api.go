@@ -14,11 +14,14 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/nicholas-fedor/watchtower/pkg/api"
+	checkAPI "github.com/nicholas-fedor/watchtower/pkg/api/check"
 	containersAPI "github.com/nicholas-fedor/watchtower/pkg/api/containers"
 	metricsAPI "github.com/nicholas-fedor/watchtower/pkg/api/metrics"
 	"github.com/nicholas-fedor/watchtower/pkg/api/update"
 	"github.com/nicholas-fedor/watchtower/pkg/container"
 	"github.com/nicholas-fedor/watchtower/pkg/metrics"
+	"github.com/nicholas-fedor/watchtower/pkg/registry"
+	"github.com/nicholas-fedor/watchtower/pkg/registry/digest"
 	"github.com/nicholas-fedor/watchtower/pkg/types"
 )
 
@@ -48,6 +51,8 @@ type Options struct {
 	EnableMetricsAPI bool
 	// EnableContainersAPI enables the read-only containers API endpoint.
 	EnableContainersAPI bool
+	// EnableCheckAPI enables the read-only check-for-updates API endpoint.
+	EnableCheckAPI bool
 	// UnblockHTTPAPI allows periodic polling alongside the HTTP API.
 	UnblockHTTPAPI bool
 	// NoStartupMessage suppresses startup messages if true.
@@ -226,6 +231,40 @@ func SetupAndStartAPI(
 		httpAPI.RegisterFunc("GET "+containersHandler.Path, containersHandler.Handle)
 	}
 
+	// Register the read-only check-for-updates API endpoint if enabled. It compares
+	// each watched container's running image digest against the registry and reports
+	// whether a newer image is available, without pulling layers or recreating containers.
+	if opts.EnableCheckAPI {
+		client := opts.Client
+		filter := opts.Filter
+
+		checkHandler := checkAPI.New(func(ctx context.Context) ([]checkAPI.Result, error) {
+			var (
+				list []types.Container
+				err  error
+			)
+
+			if filter != nil {
+				list, err = client.ListContainers(ctx, filter)
+			} else {
+				list, err = client.ListContainers(ctx)
+			}
+
+			if err != nil {
+				return nil, fmt.Errorf("failed to list containers: %w", err)
+			}
+
+			results := make([]checkAPI.Result, 0, len(list))
+			for _, container := range list {
+				results = append(results, checkContainer(ctx, container))
+			}
+
+			return results, nil
+		})
+		// Use Go 1.22+ method-based routing to restrict to GET only.
+		httpAPI.RegisterFunc("GET "+checkHandler.Path, checkHandler.Handle)
+	}
+
 	// Warn once at startup when self-update will be skipped due to host-bound port conflicts.
 	if opts.SkipSelfUpdate {
 		logrus.Warn("Skipping self-update to prevent port conflict: Watchtower container has host-bound ports")
@@ -245,4 +284,69 @@ func SetupAndStartAPI(
 	}
 
 	return nil
+}
+
+// checkContainer reports whether a newer image is available for a single watched
+// container by comparing its running image digest against the registry.
+//
+// It performs a read-only digest comparison (a registry HEAD request, the same
+// mechanism the update path uses to decide whether a pull is needed); it never pulls
+// layers or recreates the container. A registry failure is captured in the result's
+// Error field rather than aborting the whole check, so one unreachable registry does
+// not blank out the rest of the report.
+//
+// Parameters:
+//   - ctx: Context for the registry request lifecycle.
+//   - container: The watched container to check.
+//
+// Returns:
+//   - checkAPI.Result: The update-availability outcome for the container.
+func checkContainer(ctx context.Context, container types.Container) checkAPI.Result {
+	result := checkAPI.Result{
+		Name:  container.Name(),
+		Image: container.ImageName(),
+	}
+
+	// Derive the running image's registry digest from its RepoDigests, matching the
+	// format reported by the /v1/containers endpoint. Empty for locally-built images.
+	if info := container.ImageInfo(); info != nil {
+		if digests := info.RepoDigests; len(digests) > 0 {
+			if _, current, found := strings.Cut(digests[0], "@"); found {
+				result.CurrentDigest = current
+			}
+		}
+	}
+
+	// Reuse Watchtower's existing registry credentials for the image.
+	opts, err := registry.GetPullOptions(container.ImageName())
+	if err != nil {
+		logrus.WithError(err).WithField("container", container.Name()).
+			Debug("Failed to load registry credentials for check")
+
+		result.Error = err.Error()
+
+		return result
+	}
+
+	remoteDigest, matches, err := digest.CompareDigestWithRemote(
+		ctx,
+		container,
+		opts.RegistryAuth,
+	)
+	if err != nil {
+		logrus.WithError(err).WithField("container", container.Name()).
+			Debug("Failed to compare digest with registry for check")
+
+		result.Error = err.Error()
+
+		return result
+	}
+
+	if remoteDigest != "" {
+		result.LatestDigest = "sha256:" + remoteDigest
+	}
+
+	result.UpdateAvailable = !matches
+
+	return result
 }

@@ -242,6 +242,11 @@ func RegisterSystemFlags(rootCmd *cobra.Command) {
 		"",
 		envBool("WATCHTOWER_HTTP_API_CONTAINERS"),
 		"Runs Watchtower with the read-only containers API enabled, exposing each watched container's current image digest")
+	flags.BoolP(
+		"http-api-check",
+		"",
+		envBool("WATCHTOWER_HTTP_API_CHECK"),
+		"Runs Watchtower with the read-only check-for-updates API enabled, reporting whether newer images are available without applying updates")
 
 	flags.StringP(
 		"http-api-host",
