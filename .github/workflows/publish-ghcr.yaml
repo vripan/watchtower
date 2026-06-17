@@ -1,23 +1,24 @@
-name: Publish Private Image
+name: Publish Image to GHCR
 
 # Builds the Watchtower image from the current branch source (via
-# build/docker/Dockerfile.self-local) and pushes it to a private registry.
+# build/docker/Dockerfile.self-local) and pushes it to the GitHub Container
+# Registry (ghcr.io) for this repository's owner.
 #
 # This is a manual, opt-in workflow: it only runs when triggered from the
 # Actions tab. Nothing is published automatically.
 #
-# Required repository secrets (Settings -> Secrets and variables -> Actions):
-#   REGISTRY_HOST     - registry host, e.g. registry.example.com or registry.example.com:5000
-#   REGISTRY_USERNAME - username for `docker login` against REGISTRY_HOST
-#   REGISTRY_PASSWORD - password or access token for that user
+# Authentication uses the built-in GITHUB_TOKEN, so no extra secrets are
+# required. Packages pushed to GHCR are private by default; adjust the
+# package's visibility from its page under the owner's Packages tab if you
+# later want it public.
 #
-# The pushed reference is: ${REGISTRY_HOST}/${image_name}:${tag}
+# The pushed reference is: ghcr.io/<owner>/<image_name>:<tag>
 
 on:
   workflow_dispatch:
     inputs:
       image_name:
-        description: "Image repository path under the registry host (e.g. watchtower or team/watchtower)"
+        description: "Image name under ghcr.io/<owner>/ (e.g. watchtower)"
         required: false
         default: "watchtower"
         type: string
@@ -34,6 +35,9 @@ jobs:
   publish:
     name: Build and Push (amd64)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # Required to push to GHCR.
     steps:
       - name: Harden the Runner (Step Security)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -46,41 +50,27 @@ jobs:
           fetch-depth: 0 # Needed so `git describe --tags` can stamp the version.
           persist-credentials: false
 
-      - name: Validate registry secrets
-        env:
-          REGISTRY_HOST: ${{ secrets.REGISTRY_HOST }}
-          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-        run: |
-          missing=""
-          [ -z "$REGISTRY_HOST" ] && missing="$missing REGISTRY_HOST"
-          [ -z "$REGISTRY_USERNAME" ] && missing="$missing REGISTRY_USERNAME"
-          [ -z "$REGISTRY_PASSWORD" ] && missing="$missing REGISTRY_PASSWORD"
-          if [ -n "$missing" ]; then
-            echo "::error::Missing required repository secret(s):$missing"
-            echo "Set them under Settings -> Secrets and variables -> Actions."
-            exit 1
-          fi
-
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
         with:
           platforms: linux/amd64
 
-      - name: Login to private registry
+      - name: Login to GHCR
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
-          registry: ${{ secrets.REGISTRY_HOST }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push image
         env:
-          REGISTRY_HOST: ${{ secrets.REGISTRY_HOST }}
+          OWNER: ${{ github.repository_owner }}
           IMAGE_NAME: ${{ inputs.image_name }}
           IMAGE_TAG: ${{ inputs.tag }}
         run: |
-          IMAGE_REF="${REGISTRY_HOST}/${IMAGE_NAME}:${IMAGE_TAG}"
+          # GHCR requires the owner path to be lowercase.
+          OWNER_LC="$(echo "${OWNER}" | tr '[:upper:]' '[:lower:]')"
+          IMAGE_REF="ghcr.io/${OWNER_LC}/${IMAGE_NAME}:${IMAGE_TAG}"
           echo "Publishing ${IMAGE_REF}"
           docker buildx build \
             --platform linux/amd64 \
