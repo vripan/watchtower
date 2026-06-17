@@ -1,0 +1,91 @@
+name: Publish Private Image
+
+# Builds the Watchtower image from the current branch source (via
+# build/docker/Dockerfile.self-local) and pushes it to a private registry.
+#
+# This is a manual, opt-in workflow: it only runs when triggered from the
+# Actions tab. Nothing is published automatically.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   REGISTRY_HOST     - registry host, e.g. registry.example.com or registry.example.com:5000
+#   REGISTRY_USERNAME - username for `docker login` against REGISTRY_HOST
+#   REGISTRY_PASSWORD - password or access token for that user
+#
+# The pushed reference is: ${REGISTRY_HOST}/${image_name}:${tag}
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_name:
+        description: "Image repository path under the registry host (e.g. watchtower or team/watchtower)"
+        required: false
+        default: "watchtower"
+        type: string
+      tag:
+        description: "Image tag to publish"
+        required: false
+        default: "check-api"
+        type: string
+
+permissions:
+  contents: read # Declare default permissions as read only.
+
+jobs:
+  publish:
+    name: Build and Push (amd64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the Runner (Step Security)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout Repo
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0 # Needed so `git describe --tags` can stamp the version.
+          persist-credentials: false
+
+      - name: Validate registry secrets
+        env:
+          REGISTRY_HOST: ${{ secrets.REGISTRY_HOST }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          missing=""
+          [ -z "$REGISTRY_HOST" ] && missing="$missing REGISTRY_HOST"
+          [ -z "$REGISTRY_USERNAME" ] && missing="$missing REGISTRY_USERNAME"
+          [ -z "$REGISTRY_PASSWORD" ] && missing="$missing REGISTRY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required repository secret(s):$missing"
+            echo "Set them under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        with:
+          platforms: linux/amd64
+
+      - name: Login to private registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ secrets.REGISTRY_HOST }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push image
+        env:
+          REGISTRY_HOST: ${{ secrets.REGISTRY_HOST }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          IMAGE_TAG: ${{ inputs.tag }}
+        run: |
+          IMAGE_REF="${REGISTRY_HOST}/${IMAGE_NAME}:${IMAGE_TAG}"
+          echo "Publishing ${IMAGE_REF}"
+          docker buildx build \
+            --platform linux/amd64 \
+            --file build/docker/Dockerfile.self-local \
+            --tag "${IMAGE_REF}" \
+            --push \
+            .
+          echo "### Published \`${IMAGE_REF}\`" >> "$GITHUB_STEP_SUMMARY"
