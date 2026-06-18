@@ -831,6 +831,19 @@ Environment Variable: WATCHTOWER_HTTP_API_CONTAINERS
 
 !!! Note "See the [HTTP API documentation](../../advanced-features/http-api/index.md#http_api_containers) for details"
 
+### HTTP API Check
+
+Enables a read-only endpoint that reports whether newer images are available for watched containers, without applying any update.
+
+```text
+            Argument: --http-api-check
+Environment Variable: WATCHTOWER_HTTP_API_CHECK
+                Type: Boolean
+             Default: false
+```
+
+!!! Note "See the [HTTP API documentation](../../advanced-features/http-api/index.md#http_api_check) for details"
+
 ### HTTP API Host
 
 Sets the host interface for binding the HTTP API.

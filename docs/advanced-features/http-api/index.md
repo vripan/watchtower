@@ -14,6 +14,7 @@ Watchtower has an [optional](../../configuration/arguments/index.md#http_api_mod
 |     [Update](#http_api_update)     |   `POST`   |   `/v1/update`   | [`image`](#image_parameter_usage), [`async`](#asynchronous_updates) | Triggers container updates and returns JSON results of the operation |
 | [Metrics](../metrics-api/index.md) |   `GET`    |  `/v1/metrics`   |                                                                     |  Exposes Prometheus-compatible metrics for monitoring and alerting   |
 | [Containers](#http_api_containers) |   `GET`    | `/v1/containers` |                                                                     |   Lists watched containers and their current running image digests   |
+|       [Check](#http_api_check)     |   `GET`    |    `/v1/check`   |                                                                     | Reports whether newer images are available without applying updates  |
 
 !!! Note
     Endpoints enforce HTTP method restrictions using method-based routing.
@@ -341,3 +342,46 @@ The `/v1/containers` endpoint returns a JSON array of watched containers:
 
 !!! Note
     `--http-api-containers` can be enabled alongside `--http-api-update` and `--http-api-metrics`.
+
+### HTTP API Check
+
+To enable this read-only endpoint, use the `--http-api-check` CLI argument or the `WATCHTOWER_HTTP_API_CHECK` environment variable.
+
+It scans the watched containers and compares each running image's digest against the registry, reporting whether a newer image is available. It performs **no pull and no recreate** — it reuses the same staleness check (a registry `HEAD` request) the update path uses to decide whether a pull is needed, and Watchtower's existing registry credentials. This lets an external application show an "update available" banner without triggering an update or duplicating credentials.
+
+#### Response Format
+
+The `/v1/check` endpoint returns a JSON array of check results:
+
+```json
+{
+    "checked": "2025-01-20T11:30:45Z",
+    "containers": [
+        {
+            "name": "nginx",
+            "image": "nginx:latest",
+            "current_digest": "sha256:1111...",
+            "latest_digest": "sha256:2222...",
+            "update_available": true
+        }
+    ],
+    "count": 1,
+    "api_version": "v1"
+}
+```
+
+- `name`: Container name
+- `image`: Image reference with tag
+- `current_digest`: Registry manifest digest the running image was pulled from (from the image's `RepoDigests`). Empty for locally-built images with no registry reference.
+- `latest_digest`: Manifest digest currently advertised by the registry. Empty when no registry lookup was performed (locally-built images) or when the lookup failed.
+- `update_available`: `true` when the registry advertises a digest that differs from the running image's digest.
+- `error`: Present only when the registry check for that container failed; the rest of the report is still returned.
+
+##### Metadata
+
+- `checked`: UTC timestamp when the check was performed (RFC3339 format)
+- `count`: Number of containers checked
+- `api_version`: API version identifier
+
+!!! Note
+    `--http-api-check` can be enabled alongside `--http-api-update`, `--http-api-metrics`, and `--http-api-containers`.

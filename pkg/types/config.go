@@ -28,6 +28,8 @@ type RunConfig struct {
 	EnableMetricsAPI bool
 	// EnableContainersAPI enables the read-only containers API endpoint, set via the --http-api-containers flag.
 	EnableContainersAPI bool
+	// EnableCheckAPI enables the read-only check-for-updates API endpoint, set via the --http-api-check flag.
+	EnableCheckAPI bool
 	// UnblockHTTPAPI allows periodic polling alongside the HTTP API, set via the --http-api-periodic-polls flag.
 	UnblockHTTPAPI bool
 	// APIToken is the authentication token for HTTP API access, set via the --http-api-token flag.
